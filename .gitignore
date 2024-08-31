@@ -1,0 +1,9 @@
+# Files and directories to be ignored by git
+# Lines begining with '#' will be ignored
+sdkconfig
+sdkconfig.ci
+sdkconfig.ci.c2_xtal26m
+sdkconfig.ci.ipv4_only
+sdkconfig.old
+/build
+/.vscode
