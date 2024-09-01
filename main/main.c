@@ -30,7 +30,6 @@ const char* MAIN_TAG = "main.c";
 
 void app_main(void){
     ESP_LOGI(MAIN_TAG, "Entry Point");
-    //ESP_ERROR_CHECK(nvs_flash_init());
     //Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -44,7 +43,7 @@ void app_main(void){
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     wifi_init_softap();
-    ESP_LOGI(MAIN_TAG, "ESP_WIFI_MODE_AP");
+    //ESP_LOGI(MAIN_TAG, "ESP_WIFI_MODE_AP");
 
 
     /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
