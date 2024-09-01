@@ -43,16 +43,8 @@ void app_main(void){
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     wifi_init_softap();
-    //ESP_LOGI(MAIN_TAG, "ESP_WIFI_MODE_AP");
 
-
-    /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
-     * Read "Establishing Wi-Fi or Ethernet Connection" section in
-     * examples/protocols/README.md for more information about this function.
-     */
-    //ESP_ERROR_CHECK(example_connect());
-
-    xTaskCreate(tcp_server_task, "tcp_server", 8192, (void*)AF_INET, 5, NULL);
+    xTaskCreate(tcp_server_task, "tcp_server", 8192, NULL, 5, NULL);
     ESP_LOGI(MAIN_TAG, "Exit app_main");
     return;
 }
