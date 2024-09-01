@@ -1,2 +1,3 @@
-idf_component_register(SRCS "tcp_server.c"
+idf_component_register(SRCS "main.c"
+                            "softap.c"
                     INCLUDE_DIRS ".")
