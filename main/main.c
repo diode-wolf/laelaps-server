@@ -29,8 +29,7 @@
 const char* MAIN_TAG = "main.c";
 
 void app_main(void){
-    ESP_LOGI(MAIN_TAG, "Entry Point");
-    //Initialize NVS
+    //Initialize NVS, netif, create event loop handler
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
       ESP_ERROR_CHECK(nvs_flash_erase());
@@ -38,13 +37,16 @@ void app_main(void){
     }
     ESP_ERROR_CHECK(ret);
     ESP_LOGI(MAIN_TAG, "NVS Done");
-
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+    // Start wifi
     wifi_init_softap();
 
-    xTaskCreate(tcp_server_task, "tcp_server", 8192, NULL, 5, NULL);
-    ESP_LOGI(MAIN_TAG, "Exit app_main");
+    SemaphoreHandle_t server_ready = xSemaphoreCreateBinary();
+    assert(server_ready);
+    xTaskCreate(tcp_server_task, "tcp_server", 4096, &server_ready, 5, NULL);
+    xSemaphoreTake(server_ready, portMAX_DELAY);
+    vSemaphoreDelete(server_ready);
     return;
 }

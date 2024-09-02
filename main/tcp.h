@@ -17,5 +17,9 @@ Last Built With ESP-IDF v5.2.2
 #define KEEPALIVE_COUNT             5
 #define TRUE                        1
 
+#define LWIP_MAX_SOCKETS            6
+#define TCP_SERVER_BIND_ADDRESS     "192.168.4.1"
+#define TCP_SERVER_BIND_PORT        "7983"
+
 
 #endif

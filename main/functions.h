@@ -16,7 +16,7 @@ Last Built With ESP-IDF v5.2.2
 void wifi_init_softap(void);
 
 // TCP_SERVER.C
-void do_retransmit(const int sock);
+// More functions then these, but declared static
 void tcp_server_task(void *pvParameters);
 
 #endif
