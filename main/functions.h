@@ -19,4 +19,9 @@ void wifi_init_softap(void);
 // More functions then these, but declared static
 void tcp_server_task(void *pvParameters);
 
+// PROCESS_DATA.C
+void Update_Tube_ID(uint8_t socket_idx, uint8_t status);
+void Write_Rx_Storage(uint8_t socket_idx, char* data, uint16_t len);
+void Process_Rx_Data_Task(void *pvParameters);
+
 #endif

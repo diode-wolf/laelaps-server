@@ -30,9 +30,11 @@ if heartbeat not echoed back from server within ?# seconds
 #include "esp_event.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
-#include "protocol_examples_common.h"
 #include "functions.h"
 #include "tcp.h"
+
+// Static global variables
+static int sock[LWIP_MAX_SOCKETS - 1];      // An array of socket handles used to keep track of connected clients
 
 /**
  * @brief Indicates that the file descriptor represents an invalid (uninitialized or closed) socket
@@ -139,16 +141,27 @@ static inline char* get_clients_address(struct sockaddr_storage *source_addr)
     return address_str;
 }
 
-void tcp_server_task(void *pvParameters)
-{
+/*
+Close_Socket
+This function closes a socket and handles asscioated housekeeping
+The function takes the index in the socket storage array of the socket to close
+The function returns void
+*/
+void Close_Socket(uint8_t socket_idx){
+    close(sock[socket_idx]);
+    sock[socket_idx] = INVALID_SOCK;
+    Update_Tube_ID(socket_idx, SOCKET_DISCONNECT);
+    return;
+}
+
+void tcp_server_task(void *pvParameters){
     static char rx_buffer[128];
-    static const char *TAG = "nonblocking-socket-server";
+    static const char *TAG = "tcp-server";
     SemaphoreHandle_t *server_ready = pvParameters;
     struct addrinfo hints = { .ai_socktype = SOCK_STREAM };
     struct addrinfo *address_info;
     int listen_sock = INVALID_SOCK;
     const size_t max_socks = LWIP_MAX_SOCKETS - 1;
-    static int sock[LWIP_MAX_SOCKETS - 1];
 
     // Prepare a list of file descriptors to hold client's sockets, mark all of them as invalid, i.e. available
     for (int i=0; i<max_socks; ++i) {
@@ -170,7 +183,6 @@ void tcp_server_task(void *pvParameters)
         log_socket_error(TAG, listen_sock, errno, "Unable to create socket");
         goto error;
     }
-    ESP_LOGI(TAG, "Listener socket created");
 
     // Marking the socket as non-blocking
     int flags = fcntl(listen_sock, F_GETFL);
@@ -178,7 +190,6 @@ void tcp_server_task(void *pvParameters)
         log_socket_error(TAG, listen_sock, errno, "Unable to set socket non blocking");
         goto error;
     }
-    ESP_LOGI(TAG, "Socket marked as non blocking");
 
     // Binding socket to the given address
     int err = bind(listen_sock, address_info->ai_addr, address_info->ai_addrlen);
@@ -186,16 +197,14 @@ void tcp_server_task(void *pvParameters)
         log_socket_error(TAG, listen_sock, errno, "Socket unable to bind");
         goto error;
     }
-    ESP_LOGI(TAG, "Socket bound on %s:%s", TCP_SERVER_BIND_ADDRESS, TCP_SERVER_BIND_PORT);
 
     // Set queue (backlog) of pending connections to one (can be more)
-    err = listen(listen_sock, 1);
+    err = listen(listen_sock, MAX_SOCK_REQUEST_BACKLOG);
     if (err != 0) {
         log_socket_error(TAG, listen_sock, errno, "Error occurred during listen");
         goto error;
     }
-    ESP_LOGI(TAG, "Socket listening");
-    xSemaphoreGive(*server_ready);
+    xSemaphoreGive(*server_ready);      // socket setup done, release semaphore
 
     // Main loop for accepting new connections and serving all connected clients
     while (1) {
@@ -218,27 +227,26 @@ void tcp_server_task(void *pvParameters)
             if (sock[new_sock_index] < 0) {
                 if (errno == EWOULDBLOCK) { // The listener socket did not accepts any connection
                                             // continue to serve open connections and try to accept again upon the next iteration
-                    //ESP_LOGV(TAG, "No pending connections...");
                 } 
                 else {
                     log_socket_error(TAG, listen_sock, errno, "Error when accepting connection");
-                    goto error;
+                    Close_Socket(new_sock_index);
                 }
             } else {
                 // We have a new client connected -> print it's address
                 ESP_LOGI(TAG, "[sock=%d]: Connection accepted from IP:%s", sock[new_sock_index], get_clients_address(&source_addr));
+                Update_Tube_ID(new_sock_index, SOCKET_CONNECT);
 
                 // ...and set the client's socket non-blocking
                 flags = fcntl(sock[new_sock_index], F_GETFL);
                 if (fcntl(sock[new_sock_index], F_SETFL, flags | O_NONBLOCK) == -1) {
                     log_socket_error(TAG, sock[new_sock_index], errno, "Unable to set socket non blocking");
-                    goto error;
+                    Close_Socket(new_sock_index);
                 }
-                ESP_LOGI(TAG, "[sock=%d]: Socket marked as non blocking", sock[new_sock_index]);
             }
         }
 
-        // We serve all the connected clients in this loop
+        // Serve all the connected clients in this loop
         for (int i=0; i<max_socks; ++i) {
             if (sock[i] != INVALID_SOCK) {
 
@@ -247,20 +255,20 @@ void tcp_server_task(void *pvParameters)
                 if (len < 0) {
                     // Error occurred within this client's socket -> close and mark invalid
                     ESP_LOGI(TAG, "[sock=%d]: try_receive() returned %d -> closing the socket", sock[i], len);
-                    close(sock[i]);
-                    sock[i] = INVALID_SOCK;
+                    Close_Socket(i);
                 } 
                 else if (len > 0) {
                     // Received some data -> echo back
                     ESP_LOGI(TAG, "[sock=%d]: Received %.*s", sock[i], len, rx_buffer);
+                    Write_Rx_Storage(i, rx_buffer, len);        // Save data to array for processing
 
                     len = socket_send(TAG, sock[i], rx_buffer, len);
                     if (len < 0) {
                         // Error occurred on write to this socket -> close it and mark invalid
                         ESP_LOGI(TAG, "[sock=%d]: socket_send() returned %d -> closing the socket", sock[i], len);
-                        close(sock[i]);
-                        sock[i] = INVALID_SOCK;
-                    } else {
+                        Close_Socket(i);
+                    } 
+                    else {
                         // Successfully echoed to this socket
                         ESP_LOGI(TAG, "[sock=%d]: Written %.*s", sock[i], len, rx_buffer);
                     }
@@ -280,7 +288,7 @@ error:
 
     for (int i=0; i<max_socks; ++i) {
         if (sock[i] != INVALID_SOCK) {
-            close(sock[i]);
+            Close_Socket(i);
         }
     }
 

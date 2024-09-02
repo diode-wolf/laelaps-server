@@ -18,8 +18,12 @@ Last Built With ESP-IDF v5.2.2
 #define TRUE                        1
 
 #define LWIP_MAX_SOCKETS            6
+#define MAX_SOCK_REQUEST_BACKLOG    3
 #define TCP_SERVER_BIND_ADDRESS     "192.168.4.1"
 #define TCP_SERVER_BIND_PORT        "7983"
+
+#define SOCKET_CONNECT              1
+#define SOCKET_DISCONNECT           2
 
 
 #endif

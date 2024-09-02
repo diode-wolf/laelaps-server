@@ -17,7 +17,6 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_netif.h"
-#include "protocol_examples_common.h"
 
 #include "lwip/err.h"
 #include "lwip/sockets.h"
@@ -43,10 +42,14 @@ void app_main(void){
     // Start wifi
     wifi_init_softap();
 
+    // Start TCP server
     SemaphoreHandle_t server_ready = xSemaphoreCreateBinary();
     assert(server_ready);
     xTaskCreate(tcp_server_task, "tcp_server", 4096, &server_ready, 5, NULL);
     xSemaphoreTake(server_ready, portMAX_DELAY);
     vSemaphoreDelete(server_ready);
+
+    // Start Data processing task
+    xTaskCreate(Process_Rx_Data_Task, "process_data", 2048, NULL, 4, NULL);
     return;
 }
