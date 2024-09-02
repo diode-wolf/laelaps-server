@@ -18,6 +18,8 @@ void wifi_init_softap(void);
 // TCP_SERVER.C
 // More functions then these, but declared static
 void tcp_server_task(void *pvParameters);
+void TCP_Send_Index(const char *TAG, uint8_t socket_idx, const char *data, const size_t len);
+void Close_Socket(uint8_t socket_idx);
 
 // PROCESS_DATA.C
 void Update_Tube_ID(uint8_t socket_idx, uint8_t status);

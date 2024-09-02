@@ -123,6 +123,23 @@ static int socket_send(const char *tag, const int sock, const char * data, const
     return len;
 }
 
+/*
+TCP_Send_Index
+This function sends a message to the client on a specified socket
+*/
+void TCP_Send_Index(const char *TAG, uint8_t socket_idx, const char *data, const size_t len){
+    int bytes_written = socket_send(TAG, sock[socket_idx], data, len);
+    if (bytes_written < 0) {
+        // Error occurred on write to this socket -> close it and mark invalid
+        ESP_LOGI(TAG, "[sock=%d]: socket_send() returned %d -> closing the socket", sock[socket_idx], bytes_written);
+        Close_Socket(socket_idx);
+    } 
+    else {
+        // Successfully echoed to this socket
+        ESP_LOGI(TAG, "[sock=%d]: Written %.*s", sock[socket_idx], len, data);
+    }
+}
+
 
 /**
  * @brief Returns the string representation of client's address (accepted on this server)
@@ -259,19 +276,11 @@ void tcp_server_task(void *pvParameters){
                 } 
                 else if (len > 0) {
                     // Received some data -> echo back
-                    ESP_LOGI(TAG, "[sock=%d]: Received %.*s", sock[i], len, rx_buffer);
+                    //ESP_LOGI(TAG, "[sock=%d]: Received %.*s", sock[i], len, rx_buffer);
                     Write_Rx_Storage(i, rx_buffer, len);        // Save data to array for processing
 
-                    len = socket_send(TAG, sock[i], rx_buffer, len);
-                    if (len < 0) {
-                        // Error occurred on write to this socket -> close it and mark invalid
-                        ESP_LOGI(TAG, "[sock=%d]: socket_send() returned %d -> closing the socket", sock[i], len);
-                        Close_Socket(i);
-                    } 
-                    else {
-                        // Successfully echoed to this socket
-                        ESP_LOGI(TAG, "[sock=%d]: Written %.*s", sock[i], len, rx_buffer);
-                    }
+                    // Echo back to client on current socket
+                    TCP_Send_Index(TAG, i, rx_buffer, len);
                 }
 
             } // one client's socket

@@ -20,7 +20,7 @@ Last Built With ESP-IDF v5.2.2
 #include "tcp.h"
 #include "process_data.h"
 
-typedef enum socket_tube{NoSocket, Tube1, Tube2, Tube3, Tube4, Tube5, Unknown} tube_id_t;
+typedef enum socket_tube{NoSocket, Tube1, Tube2, Tube3, Tube4, Tube5, Unknown, Requested} tube_id_t;
 
 // Static global variables
 static tube_id_t tube_socket_number[LWIP_MAX_SOCKETS];
@@ -108,6 +108,8 @@ This is a rtos thread that looks at the data received from the tcp server and pr
 void Process_Rx_Data_Task(void *pvParameters){
     const char* PROCESS_DATA_TAG = "Process Data";
     uint8_t rx_row_idx_read = 0;
+    char* sub_str_ptr;
+    uint8_t tube_socket_idx;
 
     while(1){
         // If there is new data in the rx data storage buffer, print it to the pc
@@ -116,9 +118,30 @@ void Process_Rx_Data_Task(void *pvParameters){
             // Add null to end of array for safety
             rx_data_storage[rx_row_idx_read][RX_DATA_COLUMNS - 1] = '\0';
 
-            // Print data. Do more stuff here later
-            // For example, need to check if row is tube id response and save value if so
+            // Process dat
             ESP_LOGI(PROCESS_DATA_TAG, "%s", rx_data_storage[rx_row_idx_read]);
+
+            // If the line is an identification from the laelaps client, update tube_socket_number
+            sub_str_ptr = strstr(rx_data_storage[rx_row_idx_read], "$id-ack-");
+            if(sub_str_ptr != NULL){
+                tube_socket_idx = rx_data_storage[rx_row_idx_read][0] - ASCII_OFFSET;
+
+                // Double check that this is a valid index!
+                if(tube_socket_idx < LWIP_MAX_SOCKETS){
+                    tube_socket_number[tube_socket_idx] = sub_str_ptr[8] - ASCII_OFFSET; // 8 is the position of the identifier in the ack string "$id-ack-#" where # is the number of the laelaps module (not the socket the module is connected to)
+                    ESP_LOGI(PROCESS_DATA_TAG, "Associated Laelaps %c with socket %d", sub_str_ptr[8], tube_socket_idx);
+                }
+                // If there was a bad read, need to request id again. Don't know which socket failed read so do them all
+                // This is an error case that should not run
+                else{
+                    ESP_LOGI(PROCESS_DATA_TAG, "Bad ID Read");
+                    for(uint8_t i = 0; i < LWIP_MAX_SOCKETS; i++){
+                        if(tube_socket_number[i] == Requested){
+                            tube_socket_number[i] = Unknown;
+                        }
+                    }
+                }
+            }
 
             // Increment read index
             rx_row_idx_read++;
@@ -129,7 +152,8 @@ void Process_Rx_Data_Task(void *pvParameters){
         for(uint8_t i = 0; i < LWIP_MAX_SOCKETS; i++){
             if(tube_socket_number[i] == Unknown){
                 ESP_LOGI(PROCESS_DATA_TAG, "Sent ID request to client on socket %d", i);
-                // Will need to send ID request here
+                TCP_Send_Index(PROCESS_DATA_TAG, i, "$id-req\r\n", 9);
+                tube_socket_number[i] = Requested;
             }
         }
 
