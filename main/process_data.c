@@ -28,6 +28,14 @@ static uint8_t rx_data_row_idx = 0;
 static char rx_data_storage[RX_DATA_ROWS][RX_DATA_COLUMNS];
 static uint8_t rx_data_column_idx = 0;
 
+/* 
+Semaphores for thread safety
+The arrays tube_socket_number and rx_data_storage can be accessed from multiple threads
+Aquire respective semaphore before use
+*/
+SemaphoreHandle_t tube_socket_array_access = xSemaphoreCreateBinary();
+SemaphoreHandle_t rx_data_storage_access = xSemaphoreCreateBinary();
+
 /*
 Update_Tube_ID
 This function takes the index of a newly connected socket and sets the corresponding
@@ -37,6 +45,7 @@ it also takes the status of that socket (either newly connected, or disconnected
 Function returns void
 */
 void Update_Tube_ID(uint8_t socket_idx, uint8_t status){
+    xSemaphoreTake(tube_socket_array_access, portMAX_DELAY);
     switch(status){
         case SOCKET_CONNECT:
             tube_socket_number[socket_idx] = Unknown;
@@ -47,6 +56,7 @@ void Update_Tube_ID(uint8_t socket_idx, uint8_t status){
         default:
         break;
     }
+    xSemaphoreGive(tube_socket_array_access);
 }
 
 /*
@@ -71,6 +81,7 @@ It moves to the next row of the array when a newline character is received
 Returns void
 */
 void Write_Rx_Storage(uint8_t socket_idx, char* data, uint16_t len){
+    xSemaphoreTake(rx_data_storage_access, portMAX_DELAY);
      for(uint16_t i = 0; i < len; i++){
         // If this is the start of a new row, add the socket identifier to the first element of the row
         if(rx_data_column_idx == 0){
@@ -99,6 +110,7 @@ void Write_Rx_Storage(uint8_t socket_idx, char* data, uint16_t len){
             Clear_Array(rx_data_storage[rx_data_row_idx], RX_DATA_COLUMNS);
         }
     }
+    xSemaphoreGive(rx_data_storage_access);
 }
 
 /*
@@ -114,6 +126,7 @@ void Process_Rx_Data_Task(void *pvParameters){
     while(1){
         // If there is new data in the rx data storage buffer, print it to the pc
         // Later added functionality to search for particular messages if needed
+        xSemaphoreTake(rx_data_storage_access, portMAX_DELAY);
         if(rx_row_idx_read != rx_data_row_idx){
             // Add null to end of array for safety
             rx_data_storage[rx_row_idx_read][RX_DATA_COLUMNS - 1] = '\0';
@@ -147,7 +160,9 @@ void Process_Rx_Data_Task(void *pvParameters){
             rx_row_idx_read++;
             if(rx_row_idx_read >= RX_DATA_ROWS) rx_row_idx_read = 0;
         }
+        xSemaphoreGive(rx_data_storage_access);
 
+        xSemaphoreTake(tube_socket_array_access, portMAX_DELAY);
         // Scan for socket handles that need to be asscioated with a tube number
         for(uint8_t i = 0; i < LWIP_MAX_SOCKETS; i++){
             if(tube_socket_number[i] == Unknown){
@@ -156,6 +171,7 @@ void Process_Rx_Data_Task(void *pvParameters){
                 tube_socket_number[i] = Requested;
             }
         }
+        xSemaphoreGive(tube_socket_array_access);
 
         // Run this loop every 200 ms
         vTaskDelay(pdMS_TO_TICKS(200));
