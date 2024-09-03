@@ -1,5 +1,5 @@
 /*
-This file holds the macro definitions for process_data.c
+This file holds the macro definitions for process_tcp_data.c
 
 Author:         James Sorber
 Contact:        jrsorber@ncsu.edu

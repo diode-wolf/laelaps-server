@@ -17,8 +17,8 @@ Last Built With ESP-IDF v5.2.2
 #include "esp_event.h"
 #include "esp_log.h"
 #include "functions.h"
-#include "tcp.h"
-#include "process_data.h"
+#include "tcp_server.h"
+#include "process_tcp_data.h"
 
 typedef enum socket_tube{NoSocket, Tube1, Tube2, Tube3, Tube4, Tube5, Unknown, Requested} tube_id_t;
 
@@ -33,8 +33,7 @@ Semaphores for thread safety
 The arrays tube_socket_number and rx_data_storage can be accessed from multiple threads
 Aquire respective semaphore before use
 */
-SemaphoreHandle_t tube_socket_array_access = xSemaphoreCreateBinary();
-SemaphoreHandle_t rx_data_storage_access = xSemaphoreCreateBinary();
+extern SemaphoreHandle_t rx_data_storage_access;
 
 /*
 Update_Tube_ID
@@ -45,7 +44,6 @@ it also takes the status of that socket (either newly connected, or disconnected
 Function returns void
 */
 void Update_Tube_ID(uint8_t socket_idx, uint8_t status){
-    xSemaphoreTake(tube_socket_array_access, portMAX_DELAY);
     switch(status){
         case SOCKET_CONNECT:
             tube_socket_number[socket_idx] = Unknown;
@@ -56,7 +54,26 @@ void Update_Tube_ID(uint8_t socket_idx, uint8_t status){
         default:
         break;
     }
-    xSemaphoreGive(tube_socket_array_access);
+}
+
+/*
+TCP_Send_Laelaps
+This function sends a string to a specific Laelaps module
+The function takes the destination Laelaps module (1 - 5), a pointer to the message, and the length of the message
+The function returns void
+*/
+void TCP_Send_Laelaps(uint8_t laelaps, const char * data, uint16_t len){
+    const char *TAG = "TCP_Send_Laelaps";
+    uint8_t i;
+    for(i = 0; i < LWIP_MAX_SOCKETS; i++){
+        if(tube_socket_number[i] == laelaps){
+            TCP_Send_Index(TAG, i, data, len);
+            return;
+        }
+    }
+    if(i >= LWIP_MAX_SOCKETS){
+        ESP_LOGW(TAG, "Laelaps %d not found", laelaps);
+    }
 }
 
 /*
@@ -65,7 +82,7 @@ This function takes a pointer to an array and a length of the array
 It sets all array elements to zero (null character)
 Returns void
 */
- static void Clear_Array(char* array, uint16_t len){
+ void Clear_Array(char* array, uint16_t len){
     for(uint16_t i = 0; i < len; i++){
         array[i] = 0;
     }
@@ -81,7 +98,6 @@ It moves to the next row of the array when a newline character is received
 Returns void
 */
 void Write_Rx_Storage(uint8_t socket_idx, char* data, uint16_t len){
-    xSemaphoreTake(rx_data_storage_access, portMAX_DELAY);
      for(uint16_t i = 0; i < len; i++){
         // If this is the start of a new row, add the socket identifier to the first element of the row
         if(rx_data_column_idx == 0){
@@ -110,14 +126,13 @@ void Write_Rx_Storage(uint8_t socket_idx, char* data, uint16_t len){
             Clear_Array(rx_data_storage[rx_data_row_idx], RX_DATA_COLUMNS);
         }
     }
-    xSemaphoreGive(rx_data_storage_access);
 }
 
 /*
 process_rx_data_task
 This is a rtos thread that looks at the data received from the tcp server and processes it as needed
 */
-void Process_Rx_Data_Task(void *pvParameters){
+void Process_TCP_Rx_Data_Task(void *pvParameters){
     const char* PROCESS_DATA_TAG = "Process Data";
     uint8_t rx_row_idx_read = 0;
     char* sub_str_ptr;
@@ -126,12 +141,11 @@ void Process_Rx_Data_Task(void *pvParameters){
     while(1){
         // If there is new data in the rx data storage buffer, print it to the pc
         // Later added functionality to search for particular messages if needed
-        xSemaphoreTake(rx_data_storage_access, portMAX_DELAY);
         if(rx_row_idx_read != rx_data_row_idx){
             // Add null to end of array for safety
             rx_data_storage[rx_row_idx_read][RX_DATA_COLUMNS - 1] = '\0';
 
-            // Process dat
+            // Process data
             ESP_LOGI(PROCESS_DATA_TAG, "%s", rx_data_storage[rx_row_idx_read]);
 
             // If the line is an identification from the laelaps client, update tube_socket_number
@@ -160,9 +174,7 @@ void Process_Rx_Data_Task(void *pvParameters){
             rx_row_idx_read++;
             if(rx_row_idx_read >= RX_DATA_ROWS) rx_row_idx_read = 0;
         }
-        xSemaphoreGive(rx_data_storage_access);
 
-        xSemaphoreTake(tube_socket_array_access, portMAX_DELAY);
         // Scan for socket handles that need to be asscioated with a tube number
         for(uint8_t i = 0; i < LWIP_MAX_SOCKETS; i++){
             if(tube_socket_number[i] == Unknown){
@@ -171,7 +183,6 @@ void Process_Rx_Data_Task(void *pvParameters){
                 tube_socket_number[i] = Requested;
             }
         }
-        xSemaphoreGive(tube_socket_array_access);
 
         // Run this loop every 200 ms
         vTaskDelay(pdMS_TO_TICKS(200));

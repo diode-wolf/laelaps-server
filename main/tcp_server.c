@@ -31,7 +31,7 @@ if heartbeat not echoed back from server within ?# seconds
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "functions.h"
-#include "tcp.h"
+#include "tcp_server.h"
 
 // Static global variables
 static int sock[LWIP_MAX_SOCKETS - 1];      // An array of socket handles used to keep track of connected clients

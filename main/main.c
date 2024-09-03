@@ -25,9 +25,9 @@
 
 #include "functions.h"
 
-const char* MAIN_TAG = "main.c";
 
 void app_main(void){
+    const char* MAIN_TAG = "main.c";
     //Initialize NVS, netif, create event loop handler
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -39,17 +39,37 @@ void app_main(void){
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+    // Init Semaphores
+    SemaphoreHandle_t server_ready = xSemaphoreCreateBinary();
+
+    // Create Task Handles
+    TaskHandle_t Tcp_Server_Handle;
+    TaskHandle_t Process_TCP_Handle;
+    TaskHandle_t Process_USB_Handle;
+
+    // Init UART0
+    Init_UART0();
+
     // Start wifi
     wifi_init_softap();
 
     // Start TCP server
-    SemaphoreHandle_t server_ready = xSemaphoreCreateBinary();
     assert(server_ready);
-    xTaskCreate(tcp_server_task, "tcp_server", 4096, &server_ready, 5, NULL);
+    xTaskCreate(tcp_server_task, "tcp_server", 4096, &server_ready, 5, &Tcp_Server_Handle);
     xSemaphoreTake(server_ready, portMAX_DELAY);
     vSemaphoreDelete(server_ready);
 
     // Start Data processing task
-    xTaskCreate(Process_Rx_Data_Task, "process_data", 2048, NULL, 4, NULL);
+    xTaskCreate(Process_TCP_Rx_Data_Task, "process_tcp", 2048, NULL, 4, &Process_TCP_Handle);
+
+    // Start USB RX task
+    xTaskCreate(Process_USB_Rx_Data_Task, "process_usb", 4096, NULL, 3, &Process_USB_Handle);
+
+    while(1){
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        ESP_LOGI(MAIN_TAG, "TCP_Server HWM: %d", uxTaskGetStackHighWaterMark(Tcp_Server_Handle));
+        ESP_LOGI(MAIN_TAG, "TCP_Process HWM: %d", uxTaskGetStackHighWaterMark(Process_TCP_Handle));
+        ESP_LOGI(MAIN_TAG, "USB_Process HWM: %d", uxTaskGetStackHighWaterMark(Process_USB_Handle));
+    }    
     return;
 }
