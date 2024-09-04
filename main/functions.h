@@ -14,6 +14,10 @@ Last Built With ESP-IDF v5.2.2
 #ifndef FUNCTIONS_H
 #define FUNCTIONS_H
 
+// Forward define this data type so it can be recognized in this file
+enum socket_tube{NoSocket, Tube1, Tube2, Tube3, Tube4, Tube5, Unknown, Requested};
+typedef enum socket_tube tube_id_t;
+
 // SOFTAP.C
 void wifi_init_softap(void);
 
@@ -23,11 +27,13 @@ void TCP_Send_Index(const char *TAG, uint8_t socket_idx, const char *data, const
 void Close_Socket(uint8_t socket_idx);
 
 // PROCESS_TCP_DATA.C
-void Update_Tube_ID(uint8_t socket_idx, uint8_t status);
+void Update_Tube_Association(uint8_t socket_idx, tube_id_t new_association);
+int Lookup_Tube_Association(tube_id_t laelaps_id);
+tube_id_t Lookup_Socket_Association(uint8_t socket_idx);
 void Write_Rx_Storage(uint8_t socket_idx, char* data, uint16_t len);
-void Process_TCP_Rx_Data_Task(void *pvParameters);
 void Clear_Array(char* array, uint16_t len);
-void TCP_Send_Laelaps(uint8_t laelaps, const char * data, uint16_t len);
+void TCP_Send_Laelaps(tube_id_t laelaps, const char * data, uint16_t len);
+void Process_TCP_Rx_Data_Task(void *pvParameters);
 
 // PROCESS_USB_DATA.C
 void Process_USB_Rx_Data_Task(void *args);

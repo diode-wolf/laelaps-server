@@ -19,6 +19,7 @@ Last Built With ESP-IDF v5.2.2
 #include "sdkconfig.h"
 #include "functions.h"
 #include "process_usb_data.h"
+#include "process_tcp_data.h"
 
 // Static global variables
 static char usb_rx_data_storage[UART0_RX_STORAGE_ROWS][UART0_RX_STORAGE_COLUMNS];
@@ -110,11 +111,11 @@ void Process_USB_Rx_Data_Task(void *args){
             sub_str_ptr = strstr(usb_rx_data_storage[usb_rx_read_row_idx], "$fwd-laelaps-");
             if(sub_str_ptr != NULL){
                 addressed_laelaps = sub_str_ptr[13] - 0x30;
-                if(addressed_laelaps < 5){
-                    TCP_Send_Laelaps(addressed_laelaps, &sub_str_ptr[15], strlen(&sub_str_ptr[15]));
+                if((addressed_laelaps <= 5) && (addressed_laelaps >= 1)){
+                    TCP_Send_Laelaps((tube_id_t) addressed_laelaps, &sub_str_ptr[15], strlen(&sub_str_ptr[15]));
                 }
                 else{
-                    ESP_LOGI(USB_RX_TAG, "Invalid laelaps address %d", addressed_laelaps);
+                    ESP_LOGW(USB_RX_TAG, "Invalid laelaps id: %d", addressed_laelaps);
                 }
             }
 

@@ -32,9 +32,12 @@ if heartbeat not echoed back from server within ?# seconds
 #include "nvs_flash.h"
 #include "functions.h"
 #include "tcp_server.h"
+#include "process_tcp_data.h"
 
 // Static global variables
-static int sock[LWIP_MAX_SOCKETS - 1];      // An array of socket handles used to keep track of connected clients
+static int sock[MAX_LAELAPS];      // An array of socket handles used to keep track of connected clients
+
+
 
 /**
  * @brief Indicates that the file descriptor represents an invalid (uninitialized or closed) socket
@@ -167,18 +170,18 @@ The function returns void
 void Close_Socket(uint8_t socket_idx){
     close(sock[socket_idx]);
     sock[socket_idx] = INVALID_SOCK;
-    Update_Tube_ID(socket_idx, SOCKET_DISCONNECT);
+    Update_Tube_Association(socket_idx, NoSocket);
     return;
 }
 
 void tcp_server_task(void *pvParameters){
     static char rx_buffer[128];
     static const char *TAG = "tcp-server";
-    SemaphoreHandle_t *server_ready = pvParameters;
+    SemaphoreHandle_t *server_ready_access = pvParameters;
     struct addrinfo hints = { .ai_socktype = SOCK_STREAM };
     struct addrinfo *address_info;
     int listen_sock = INVALID_SOCK;
-    const size_t max_socks = LWIP_MAX_SOCKETS - 1;
+    const size_t max_socks = MAX_LAELAPS;
 
     // Prepare a list of file descriptors to hold client's sockets, mark all of them as invalid, i.e. available
     for (int i=0; i<max_socks; ++i) {
@@ -221,7 +224,7 @@ void tcp_server_task(void *pvParameters){
         log_socket_error(TAG, listen_sock, errno, "Error occurred during listen");
         goto error;
     }
-    xSemaphoreGive(*server_ready);      // socket setup done, release semaphore
+    xSemaphoreGive(*server_ready_access);      // socket setup done, release semaphore
 
     // Main loop for accepting new connections and serving all connected clients
     while (1) {
@@ -230,7 +233,7 @@ void tcp_server_task(void *pvParameters){
 
         // Find a free socket
         int new_sock_index = 0;
-        for (new_sock_index=0; new_sock_index<max_socks; ++new_sock_index) {
+        for (new_sock_index=0; new_sock_index < max_socks; ++new_sock_index) {
             if (sock[new_sock_index] == INVALID_SOCK) {
                 break;
             }
@@ -249,10 +252,11 @@ void tcp_server_task(void *pvParameters){
                     log_socket_error(TAG, listen_sock, errno, "Error when accepting connection");
                     Close_Socket(new_sock_index);
                 }
-            } else {
+            } 
+            else{
                 // We have a new client connected -> print it's address
                 ESP_LOGI(TAG, "[sock=%d]: Connection accepted from IP:%s", sock[new_sock_index], get_clients_address(&source_addr));
-                Update_Tube_ID(new_sock_index, SOCKET_CONNECT);
+                Update_Tube_Association(new_sock_index, Unknown);
 
                 // ...and set the client's socket non-blocking
                 flags = fcntl(sock[new_sock_index], F_GETFL);
@@ -271,7 +275,7 @@ void tcp_server_task(void *pvParameters){
                 int len = try_receive(TAG, sock[i], rx_buffer, sizeof(rx_buffer));
                 if (len < 0) {
                     // Error occurred within this client's socket -> close and mark invalid
-                    ESP_LOGI(TAG, "[sock=%d]: try_receive() returned %d -> closing the socket", sock[i], len);
+                    ESP_LOGW(TAG, "[sock=%d]: try_receive() returned %d -> closing the socket", sock[i], len);
                     Close_Socket(i);
                 } 
                 else if (len > 0) {
@@ -280,7 +284,7 @@ void tcp_server_task(void *pvParameters){
                     Write_Rx_Storage(i, rx_buffer, len);        // Save data to array for processing
 
                     // Echo back to client on current socket
-                    TCP_Send_Index(TAG, i, rx_buffer, len);
+                    //TCP_Send_Index(TAG, i, rx_buffer, len);
                 }
 
             } // one client's socket
@@ -297,7 +301,9 @@ error:
 
     for (int i=0; i<max_socks; ++i) {
         if (sock[i] != INVALID_SOCK) {
-            Close_Socket(i);
+            // Don't check mutex here as this is already a fatal error case and don't want to prevent task shutdown
+            close(sock[i]);
+            sock[i] = INVALID_SOCK;
         }
     }
 

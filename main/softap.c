@@ -1,11 +1,14 @@
-/*  WiFi softAP Example
+/*
+This file holds the code for running the tcp server used to connect to the
+Access point esp32 on the drop module
 
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
-
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
+Author:         James Sorber
+Contact:        jrsorber@ncsu.edu
+Created:        9/02/2024
+Modified:       -
+Last Built With ESP-IDF v5.2.2
 */
+
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -14,24 +17,24 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
-
 #include "lwip/err.h"
 #include "lwip/sys.h"
-
 #include "functions.h"
 
-/* The examples use WiFi configuration that you can set via project configuration menu.
-
-   If you'd rather not, just change the below entries to strings with
-   the config you want - ie #define EXAMPLE_WIFI_SSID "mywifissid"
-*/
+// Need to move to .h file
 #define ESP_WIFI_SSID      "laelaps-tcp"
 #define ESP_WIFI_PASS      ""
 #define ESP_WIFI_CHANNEL   7
 #define MAX_STA_CONN       5
 
+// Static global variables
 static const char *AP_TAG = "softap.c";
 
+/*
+wifi_event_handler
+This function is installed with the wifi event handler loop
+It provides logging information when a station connects or disconnects from the access point
+*/
 void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                     int32_t event_id, void* event_data)
 {
@@ -46,6 +49,10 @@ void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
+/*
+wifi_init_softap(void)
+This function starts the wifi in access point mode
+*/
 void wifi_init_softap(void)
 {
     //ESP_ERROR_CHECK(esp_netif_init());

@@ -25,6 +25,10 @@
 
 #include "functions.h"
 
+// Mutexes
+SemaphoreHandle_t association_array_mutex;
+SemaphoreHandle_t tcp_rx_array_mutex;
+
 
 void app_main(void){
     const char* MAIN_TAG = "main.c";
@@ -40,7 +44,10 @@ void app_main(void){
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     // Init Semaphores
+    ESP_LOGI(MAIN_TAG, "Free heap size: %lu", esp_get_free_heap_size());
     SemaphoreHandle_t server_ready = xSemaphoreCreateBinary();
+    association_array_mutex = xSemaphoreCreateMutex();
+    tcp_rx_array_mutex = xSemaphoreCreateMutex();
 
     // Create Task Handles
     TaskHandle_t Tcp_Server_Handle;
@@ -55,21 +62,22 @@ void app_main(void){
 
     // Start TCP server
     assert(server_ready);
-    xTaskCreate(tcp_server_task, "tcp_server", 4096, &server_ready, 5, &Tcp_Server_Handle);
+    xTaskCreate(tcp_server_task, "tcp_server", 3072, &server_ready, 5, &Tcp_Server_Handle);
     xSemaphoreTake(server_ready, portMAX_DELAY);
     vSemaphoreDelete(server_ready);
 
     // Start Data processing task
-    xTaskCreate(Process_TCP_Rx_Data_Task, "process_tcp", 2048, NULL, 4, &Process_TCP_Handle);
+    xTaskCreate(Process_TCP_Rx_Data_Task, "process_tcp", 3072, NULL, 4, &Process_TCP_Handle);
 
     // Start USB RX task
-    xTaskCreate(Process_USB_Rx_Data_Task, "process_usb", 4096, NULL, 3, &Process_USB_Handle);
+    xTaskCreate(Process_USB_Rx_Data_Task, "process_usb", 3072, NULL, 3, &Process_USB_Handle);
 
-    while(1){
-        vTaskDelay(pdMS_TO_TICKS(5000));
-        ESP_LOGI(MAIN_TAG, "TCP_Server HWM: %d", uxTaskGetStackHighWaterMark(Tcp_Server_Handle));
-        ESP_LOGI(MAIN_TAG, "TCP_Process HWM: %d", uxTaskGetStackHighWaterMark(Process_TCP_Handle));
-        ESP_LOGI(MAIN_TAG, "USB_Process HWM: %d", uxTaskGetStackHighWaterMark(Process_USB_Handle));
-    }    
+    // Uncomment to print log of stack high water marks
+    // while(1){
+    //     vTaskDelay(pdMS_TO_TICKS(15000));
+    //     ESP_LOGI(MAIN_TAG, "TCP_Server HWM: %d", uxTaskGetStackHighWaterMark(Tcp_Server_Handle));
+    //     ESP_LOGI(MAIN_TAG, "TCP_Process HWM: %d", uxTaskGetStackHighWaterMark(Process_TCP_Handle));
+    //     ESP_LOGI(MAIN_TAG, "USB_Process HWM: %d", uxTaskGetStackHighWaterMark(Process_USB_Handle));
+    // }    
     return;
 }

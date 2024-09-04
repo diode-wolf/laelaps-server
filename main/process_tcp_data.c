@@ -20,41 +20,57 @@ Last Built With ESP-IDF v5.2.2
 #include "tcp_server.h"
 #include "process_tcp_data.h"
 
-typedef enum socket_tube{NoSocket, Tube1, Tube2, Tube3, Tube4, Tube5, Unknown, Requested} tube_id_t;
+extern SemaphoreHandle_t association_array_mutex;
+extern SemaphoreHandle_t tcp_rx_array_mutex;
 
 // Static global variables
-static tube_id_t tube_socket_number[LWIP_MAX_SOCKETS];
+static tube_id_t laelaps_association[MAX_LAELAPS];      // -1 because one socket will be used for listening for connections
 static uint8_t rx_data_row_idx = 0;
 static char rx_data_storage[RX_DATA_ROWS][RX_DATA_COLUMNS];
 static uint8_t rx_data_column_idx = 0;
 
-/* 
-Semaphores for thread safety
-The arrays tube_socket_number and rx_data_storage can be accessed from multiple threads
-Aquire respective semaphore before use
-*/
-extern SemaphoreHandle_t rx_data_storage_access;
 
 /*
 Update_Tube_ID
-This function takes the index of a newly connected socket and sets the corresponding
-tube number to either unknown or nosocket.
-The function takes the index of the socket in the array of socket handles (in tcp_server.c),
-it also takes the status of that socket (either newly connected, or disconnected)
-Function returns void
+This function updates the value of the global resource laelaps association array
+The function takes the index of the socket to associate, and the new association
 */
-void Update_Tube_ID(uint8_t socket_idx, uint8_t status){
-    switch(status){
-        case SOCKET_CONNECT:
-            tube_socket_number[socket_idx] = Unknown;
-        break;
-        case SOCKET_DISCONNECT:
-            tube_socket_number[socket_idx] = NoSocket;
-        break;
-        default:
-        break;
-    }
+void Update_Tube_Association(uint8_t socket_idx, tube_id_t new_association){
+    xSemaphoreTake(association_array_mutex, portMAX_DELAY);
+    laelaps_association[socket_idx] = new_association;
+    xSemaphoreGive(association_array_mutex);
+    return;
 }
+
+tube_id_t Lookup_Socket_Association(uint8_t socket_idx){
+    xSemaphoreTake(association_array_mutex, portMAX_DELAY);
+    tube_id_t return_val;
+    return_val = laelaps_association[socket_idx];
+    xSemaphoreGive(association_array_mutex);
+    return return_val;
+}
+
+/*
+int Lookup_Tube_Association
+This function is used to find which socket a particular laelaps is connected to
+The function takes the number of the desired laelaps and returns the index of the socket
+or -1 if the specified laelaps is not connected
+*/
+int Lookup_Tube_Association(tube_id_t laelaps_id){
+    xSemaphoreTake(association_array_mutex, portMAX_DELAY);
+    int return_val = -1;
+    for(uint8_t i = 0; i < MAX_LAELAPS; i++){
+        if(laelaps_association[i] == laelaps_id){
+            return_val = i;
+            break;
+        }
+    }
+    xSemaphoreGive(association_array_mutex);
+    return return_val;
+}
+
+
+
 
 /*
 TCP_Send_Laelaps
@@ -62,17 +78,17 @@ This function sends a string to a specific Laelaps module
 The function takes the destination Laelaps module (1 - 5), a pointer to the message, and the length of the message
 The function returns void
 */
-void TCP_Send_Laelaps(uint8_t laelaps, const char * data, uint16_t len){
+void TCP_Send_Laelaps(tube_id_t laelaps, const char * data, uint16_t len){
     const char *TAG = "TCP_Send_Laelaps";
-    uint8_t i;
-    for(i = 0; i < LWIP_MAX_SOCKETS; i++){
-        if(tube_socket_number[i] == laelaps){
-            TCP_Send_Index(TAG, i, data, len);
-            return;
-        }
-    }
-    if(i >= LWIP_MAX_SOCKETS){
+    int socket_address;
+    
+    // Find which socket the target laelaps is on
+    socket_address = Lookup_Tube_Association(laelaps);
+    if(socket_address < 0){
         ESP_LOGW(TAG, "Laelaps %d not found", laelaps);
+    }
+    else{
+        TCP_Send_Index(TAG, socket_address, data, len);
     }
 }
 
@@ -98,7 +114,8 @@ It moves to the next row of the array when a newline character is received
 Returns void
 */
 void Write_Rx_Storage(uint8_t socket_idx, char* data, uint16_t len){
-     for(uint16_t i = 0; i < len; i++){
+    xSemaphoreTake(tcp_rx_array_mutex, portMAX_DELAY);
+    for(uint16_t i = 0; i < len; i++){
         // If this is the start of a new row, add the socket identifier to the first element of the row
         if(rx_data_column_idx == 0){
             rx_data_storage[rx_data_row_idx][rx_data_column_idx] = socket_idx + ASCII_OFFSET;
@@ -126,6 +143,8 @@ void Write_Rx_Storage(uint8_t socket_idx, char* data, uint16_t len){
             Clear_Array(rx_data_storage[rx_data_row_idx], RX_DATA_COLUMNS);
         }
     }
+    xSemaphoreGive(tcp_rx_array_mutex);
+    return;
 }
 
 /*
@@ -140,8 +159,8 @@ void Process_TCP_Rx_Data_Task(void *pvParameters){
 
     while(1){
         // If there is new data in the rx data storage buffer, print it to the pc
-        // Later added functionality to search for particular messages if needed
         if(rx_row_idx_read != rx_data_row_idx){
+            xSemaphoreTake(tcp_rx_array_mutex, portMAX_DELAY);
             // Add null to end of array for safety
             rx_data_storage[rx_row_idx_read][RX_DATA_COLUMNS - 1] = '\0';
 
@@ -154,17 +173,18 @@ void Process_TCP_Rx_Data_Task(void *pvParameters){
                 tube_socket_idx = rx_data_storage[rx_row_idx_read][0] - ASCII_OFFSET;
 
                 // Double check that this is a valid index!
-                if(tube_socket_idx < LWIP_MAX_SOCKETS){
-                    tube_socket_number[tube_socket_idx] = sub_str_ptr[8] - ASCII_OFFSET; // 8 is the position of the identifier in the ack string "$id-ack-#" where # is the number of the laelaps module (not the socket the module is connected to)
+                if(tube_socket_idx < MAX_LAELAPS){
+                    Update_Tube_Association(tube_socket_idx, (tube_id_t) (sub_str_ptr[8] - ASCII_OFFSET));
+                    // 8 is the position of the identifier in the ack string "$id-ack-#" where # is the number of the laelaps module (not the socket the module is connected to)
                     ESP_LOGI(PROCESS_DATA_TAG, "Associated Laelaps %c with socket %d", sub_str_ptr[8], tube_socket_idx);
                 }
                 // If there was a bad read, need to request id again. Don't know which socket failed read so do them all
-                // This is an error case that should not run
+                // This is an error case that should not run so inefficient function calls don't really mater
                 else{
-                    ESP_LOGI(PROCESS_DATA_TAG, "Bad ID Read");
-                    for(uint8_t i = 0; i < LWIP_MAX_SOCKETS; i++){
-                        if(tube_socket_number[i] == Requested){
-                            tube_socket_number[i] = Unknown;
+                    ESP_LOGW(PROCESS_DATA_TAG, "Bad ID Read");
+                    for(uint8_t i = 0; i < MAX_LAELAPS; i++){
+                        if(Lookup_Socket_Association(i) == Requested){
+                            Update_Tube_Association(i, Unknown);
                         }
                     }
                 }
@@ -173,14 +193,15 @@ void Process_TCP_Rx_Data_Task(void *pvParameters){
             // Increment read index
             rx_row_idx_read++;
             if(rx_row_idx_read >= RX_DATA_ROWS) rx_row_idx_read = 0;
+            xSemaphoreGive(tcp_rx_array_mutex);
         }
 
         // Scan for socket handles that need to be asscioated with a tube number
-        for(uint8_t i = 0; i < LWIP_MAX_SOCKETS; i++){
-            if(tube_socket_number[i] == Unknown){
+        for(uint8_t i = 0; i < MAX_LAELAPS; i++){
+            if(Lookup_Socket_Association(i) == Unknown){
                 ESP_LOGI(PROCESS_DATA_TAG, "Sent ID request to client on socket %d", i);
                 TCP_Send_Index(PROCESS_DATA_TAG, i, "$id-req\r\n", 9);
-                tube_socket_number[i] = Requested;
+                Update_Tube_Association(i, Requested);
             }
         }
 
